@@ -9,9 +9,9 @@
 \alias{summary.sbhm}
 \title{Fit a simple hierarchical normal model with MCMC}
 \usage{
-sbhm(y, s, m = 0, tauScale = NULL, engine = "stan", nchains = NULL,
-  iter = 41000, burn = 1000, thin = 4, probs = c(0.025, 0.25, 0.5, 0.75,
-  0.975))
+sbhm(y, s, m = 0, tauScale = NULL, engine = c("stan", "jags"),
+  nchains = NULL, iter = 41000, burn = 1000, thin = 4,
+  probs = c(0.025, 0.25, 0.5, 0.75, 0.975))
 
 \method{print}{sbhm}(x, digits = 3, ...)
 

@@ -1,6 +1,54 @@
 #' @import rjags coda
 NULL
 
+runStan <- function(data, nchains, iter, burn, thin) {
+    is.stan <- requireNamespace("rstan")
+    if (!is.stan) {
+        stop("rstan is not available")
+    }
+    mod <- "data {  int<lower=0> J;
+                    real y[J];
+                    real<lower=0> sigma[J];
+                    real m;
+                    real tauScale;
+                  }
+            parameters {
+                    real theta[J];
+                    real mu;
+                    real<lower=0> tau;
+            }
+            model {
+                    mu ~ normal(m, 10000);          // standard deviation is 10^4
+                    tau ~ cauchy(0, tauScale);      // scale
+                    theta ~ normal(mu, tau);
+                    y ~ normal(theta, sigma);
+            }"
+    rstan::stan(model_code=mod, data=data,
+                chains=nchains, iter=iter, warmup=burn, thin=thin)
+}
+
+runJags <- function(data, nchains, iter, burn, thin) {
+    ## jags is always available (from the NAMESPACE)
+    mod <- "model {
+              for(i in 1:J) {
+                theta[i] ~ dnorm(mu, tau)
+                thes[i] <- pow(sigma[i], -2)
+                y[i] ~ dnorm(theta[i], thes[i])
+              }
+              mu ~ dnorm(m, pow(10000, -2))
+              itau ~ dt(0, pow(tauScale, -2), 1) T(0,)
+              tau <- pow(itau, -2)
+            }"
+    sink(tempfile()) # Hide output: suppressMessages won't work
+    on.exit(sink())
+    res <- jags.model(textConnection(mod),
+                      data=data,
+                      n.chains=nchains)
+    coda.samples(res, n.iter=iter - burn,
+                 c("theta", "mu", "tau"),
+                 thin=thin)
+}
+
 #' Fit a simple hierarchical normal model with MCMC
 #' @aliases print.sbhm summary.sbhm plot.sbhm print.summary.sbhm get.sbhm.summary
 #' @param y The observed group means.
@@ -54,157 +102,99 @@ NULL
 #' names(y) <- merit$country # used as labels in the plot
 #' mod <- sbhm(y=y, s=merit$se, nchains=2)
 #' plot(mod)
-
 #' }
 #' @export sbhm
-sbhm <- function(y, s, m=0, tauScale=NULL, engine="stan",
-                nchains=NULL, iter=41000, burn=1000, thin=4,
-                probs=c(.025, .25, .5, .75, .975)){
-  thecall <- match.call()
+sbhm <- function(y, s, m=0, tauScale=NULL, engine=c("stan", "jags"),
+                 nchains=NULL, iter=41000, burn=1000, thin=4,
+                 probs=c(.025, .25, .5, .75, .975)){
+    thecall <- match.call()
+    
+    engine <- match.arg(engine)
 
-  engine <- casefold(engine)
-  
-  if (!(engine %in% c("jags", "stan"))){
-    stop("engine must be either 'jags' or 'stan'")
-  } else if (engine == "stan"){
-    is.stan <- requireNamespace("rstan")
-    if (is.stan){
-      has.parallel <- requireNamespace("parallel")
-      if (is.null(nchains)){
-        nchains <- parallel::detectCores() -1 # Assumes multiple cores and leaves one for other stuff to use
-        if (nchains == 0) nchains <- 1
-      }
-      on.exit(parallel::stopCluster(cl))
-      cl <- parallel::makeCluster(nchains, outfile="parallel.log")
+    ## setup the data
+    
+    J <- length(y)
+    if (length(s) != J) {
+        stop("y and s have different lengths")
     }
-  } else { # engine == "jags"
-    is.coda <- requireNamespace("coda")
-    is.jags <- requireNamespace("rjags")
-    if (!is.jags) stop("You need to have either the rstan or rjags package installed")
-    if (is.null(nchains)) nchains <- 3
-  }
+    
+    if (missing(tauScale)) {
+        tauScale <- 2 * abs(diff(range(y))) # let it fail if there are NAs
+    }
+    
+    d <- list(J=J, y=y, sigma=s, tauScale=tauScale, m=m)
+    
+    res <-
+        switch(engine,
+               stan={
+                   nchains <- if (is.null(nchains)) {1} else {nchains}
+                   runStan(d, nchains, iter, burn, thin)
+               },
+               jags={
+                   nchains <- if (is.null(nchains)) {3} else {nchains}
+                   runJags(d, nchains, iter, burn, thin)
+               },
+               stop("unknown MCMC engine"))
+    
+    data <- data.frame(y=y, s=s)
+    if (!is.null(names(y))) rownames(data) <- names(y)
+    
+    res <- list(fit=res,
+                probs=probs,
+                engine=engine,
+                data=data,
+                call=thecall)
 
-  J <- length(y)
-  if (length(s) != J)
-    stop("y and s have different lengths")
-
-  if (missing(tauScale))
-    tauScale <- 2 * abs(diff(range(y))) # let it fail if there are NAs
-
-  d <- list(J=J, y=y, sigma=s, tauScale=tauScale, m=m)
-
-  if (engine == "stan"){
-    mod <- "data {  int<lower=0> J;
-                    real y[J];
-                    real<lower=0> sigma[J];
-                    real m;
-                    real tauScale;
-                  }
-            parameters {
-                    real theta[J];
-                    real mu;
-                    real<lower=0> tau;
-            }
-            model {
-                    mu ~ normal(m, 10000);          // standard deviation is 10^4
-                    tau ~ cauchy(0, tauScale);      // scale
-                    theta ~ normal(mu, tau);
-                    y ~ normal(theta, sigma);
-            }"
-    if (has.parallel & nchains > 1){
-      res <- parallel::parLapply(cl, 1:nchains, fun=function(cid, mod){
-                                          requireNamespace("rstan")
-                                          rstan::stan(model_code=mod, data=d,
-                                                       chains=1, iter=iter, warmup=burn, thin=thin,
-                                                       chain_id=cid)
-                                        }, mod=mod
-                     ) # close parLapply
-      res <- rstan::sflist2stanfit(res)
-    } else if (nchains > 1){ # but parallel is not available
-      res <- lapply(1:nchains, fun=function(cid){
-                                     rstan::stan(model_code=mod, data=d,
-                                                 chains=1, iter=iter, warmup=burn, thin=thin,
-                                                 chain_id=cid)
-                                      }
-      ) # close lapply
-      res <- rstan::sflist2stanfit(res)
-    } else { # one chain
-      res <- rstan::stan(model_code=mod, data=d,
-                         chains=1, iter=iter, warmup=burn, thin=thin,
-                         chain_id=1)
-      
-    } # close else
-
-  } else {
-    mod <- "model {
-              for(i in 1:J) {
-                theta[i] ~ dnorm(mu, tau)
-                thes[i] <- pow(sigma[i], -2)
-                y[i] ~ dnorm(theta[i], thes[i])
-              }
-              mu ~ dnorm(m, pow(10000, -2))
-              itau ~ dt(0, pow(tauScale, -2), 1) T(0,)
-              tau <- pow(itau, -2)
-            }"
-    sink(tempfile()) # Hide output: suppressMessages won't work
-    on.exit(sink())
-    res <- rjags::jags.model(textConnection(mod),
-                             data=list("sigma"=s, "y"=y, "J"=J, m=m, tauScale=tauScale),
-                             n.chains=nchains)
-    res <- rjags::coda.samples(res, n.iter=iter - burn, c("theta", "mu", "tau"), thin=thin)
-  }
-
-  data <- data.frame(y=y, s=s)
-  if (!is.null(names(y))) rownames(data) <- names(y)
-
-  res <- list(fit=res, probs=probs, engine=engine, data=data, call=thecall)
-
-  class(res) <- "sbhm"
-  res
+    class(res) <- "sbhm"
+    res
 }
+
 
 #' @export get.sbhm.summary
 get.sbhm.summary <- function(x){
-  if (x$engine == "stan"){
-    res <- rstan::summary(x$fit, probs=x$probs)[[1]]
-    res <- res[-nrow(res), 4:8] # Drop log-posterior row, various suammry cols
-  } else {
-    res <- coda:::summary.mcmc.list(x$fit, quantiles=x$probs)[[2]]
-    res <- rbind(res[-c(1:2), ], res[1:2, ]) # reorder columns to match stan output
-    res[nrow(res), ] <- rev(sqrt(1/res[nrow(res), ])) # convert to same parameterization as stan
-  }
-  res
+    switch(x$engine,
+           stan={
+               res <- rstan::summary(x$fit, probs=x$probs)[[1]]
+               ## Drop log-posterior row, various suammry cols
+               res[-nrow(res), 4:8]
+           },
+           jags={
+               res <- summary(x$fit, quantiles=x$probs)[[2]]
+               ## reorder columns to match stan output
+               res <- rbind(res[-c(1:2), ], res[1:2, ])
+               ## convert to same parameterization as stan
+               res[nrow(res), ] <- rev(sqrt(1/res[nrow(res), ]))
+               res
+           },
+           stop("unknown engine"))
 }
 
-#' @method print sbhm
 #' @describeIn sbhm Print method for sbhm
-#' @export print.sbhm
+#' @export
 print.sbhm <- function(x, digits=3, ...){
   res <- get.sbhm.summary(x)
   print(res, digits=digits)
   invisible(NULL)
 }
 
-#' @method summary sbhm
-#' @export summary.sbhm
+#' @export
 summary.sbhm <- function(object, ...){
-  # default stan or jags output. Assume the user knows what they're doing
-  res <- if (class(object$fit) == "stanfit") rstan::summary(object$fit, probs=object$probs) 
-         else coda:::summary.mcmc.list(object$fit, quantile=object$probs)
-  class(res) <- "summary.sbhm"
-  res
+    ## default stan or jags output. Assume the user knows what they're doing
+    res <- switch(object$engine,
+                  stan=rstan::summary(object$fit, probs=object$probs),
+                  jags=summary(object$fit, quantile=object$probs))
+    class(res) <- "summary.sbhm"
+    res
 }
 
-#' @method print summary.sbhm
-#' @export print.summary.sbhm
+##' @export
 print.summary.sbhm <- function(x, ...){
   print(unclass(x))
   invisible(x)
 }
 
-#' @method plot sbhm
 #' @describeIn sbhm Plot an sbhm object
-#' @export plot.sbhm
+#' @export
 plot.sbhm <- function(x, xlab="Estimates", ylab="", main="", mle.col="blue", sbhm.col="orange",
                      margins=c(5.1, 7.1, 4.1, 2.1),
                      offset=.2, lwd.step=2, cex=1.5, ...){
