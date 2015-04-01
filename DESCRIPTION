@@ -1,0 +1,12 @@
+Package: sbhm
+Type: Package
+Title: Fit and summarize simple Bayesian hierarchical models
+Version: 0.1
+Date: 2015-03-19
+Author: Harry Southworth
+Maintainer: Harry Southworth <harry@dataclarityconsulting.co.uk>
+LazyData: TRUE
+Description: Use Stan or JAGS to fit a Gaussian hierarchical model with 2 levels and no covariates
+Depends: rjags, coda
+Suggests: rstan, parallel, testthat
+License: TBD
