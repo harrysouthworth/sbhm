@@ -19,62 +19,92 @@ bda <- matrix(ncol=5, byrow=TRUE,
                 -1, 7, 10, 15, 26,
                 -6, 3, 8, 13, 33))
 
-test_that("8 schools example is reproduced accurately with single chain", {
-  Sys.setenv("R_TESTS" = "") # Prevent R CMD check failure with parallel
+test_that(
+    "8 schools example is reproduced accurately with single chain (stan)",
+    {
+        set.seed(17010702)
 
-  set.seed(17010702)
+        has.stan <- requireNamespace("rstan")
+        if (!has.stan) {
+            skip("rstan not available")
+        }
+  
+        smod <- sbhm(schools$effect, schools$se, nchains=1)
+        ss <- get.sbhm.summary(smod)[1:8, ]
 
-  has.stan <- require(rstan)
+        ## Quartiles should be less variable than the 95% intervals
+        expect_equal(unname(ss[, 2:4] / bda[, 2:4]),
+                     matrix(1, ncol=3, nrow=8), tolerance=.15,
+                     label="Single chain Stan output matches BDA")
+        ## Allow more divergence for the 95% limits
+        expect_equal(unname(ss[, c(1, 5)] / bda[, c(1, 5)]),
+                     matrix(1, ncol=2, nrow=8), tolerance=.2,
+                     label="Single chain Stan output matches BDA")
+    }
+)
 
-  if (has.stan){
-    smod <- sbhm(schools$effect, schools$se, nchains=1)
-    ss <- get.sbhm.summary(smod)[1:8, ]
+test_that(
+    "8 schools example is reproduced accurately with single chain (jags)",
+    {
+        set.seed(17610407)
 
-    # Quartiles should be less variable than the 95% intervals
-    expect_equal(unname(ss[, 2:4] / bda[, 2:4]), matrix(1, ncol=3, nrow=8), tolerance=.15,
-                 label="Single chain Stan output matches BDA")
-    # Allow more divergence for the 95% limits
-    expect_equal(unname(ss[, c(1, 5)] / bda[, c(1, 5)]), matrix(1, ncol=2, nrow=8), tolerance=.2,
-                 label="Single chain Stan output matches BDA")
-  }
+        jmod <- sbhm(schools$effect, schools$se,
+                     nchains=1, engine="jags")
+        sj <- get.sbhm.summary(jmod)[1:8, ]
+        
+        ## Quartiles should be less variable than the 95%
+        ## intervals
+        expect_equal(unname(sj[, 2:4] / bda[, 2:4]),
+                     matrix(1, ncol=3, nrow=8), tolerance=.15,
+                     label="Single chain JAGS output matches BDA")
+        
+        ## Allow more divergence for the 95% limits
+        expect_equal(unname(sj[, c(1, 5)] / bda[, c(1, 5)]),
+                     matrix(1, ncol=2, nrow=8), tolerance=.2,
+                     label="Single chain JAGS output matches BDA")
+    }
+)
 
-  jmod <- sbhm(schools$effect, schools$se, nchains=1, engine="jags")
-  sj <- get.sbhm.summary(jmod)[1:8, ]
 
-  # Quartiles should be less variable than the 95% intervals
-  expect_equal(unname(sj[, 2:4] / bda[, 2:4]), matrix(1, ncol=3, nrow=8), tolerance=.15,
-               label="Single chain Stan output matches BDA")
+test_that(
+    "8 schools example is reproduced accurately with multiple chains (stan)",
+    {
+        set.seed(17610407)
 
-  # Allow more divergence for the 95% limits
-  expect_equal(unname(sj[, c(1, 5)] / bda[, c(1, 5)]), matrix(1, ncol=2, nrow=8), tolerance=.2,
-               label="Single chain Stan output matches BDA")
-})
+        has.stan <- requireNamespace("rstan")
+        if (!has.stan) {
+            skip("rstan not available")
+        }
+        smod <- sbhm(schools$effect, schools$se, nchains=4)
+        ss <- get.sbhm.summary(smod)[1:8, ]
+  
+        ## Quartiles should be less variable than the 95% intervals
+        expect_equal(unname(ss[, 2:4] / bda[, 2:4]),
+                     matrix(1, ncol=3, nrow=8), tolerance=.15,
+                     label="Multiple chain Stan output matches BDA")
+        ## Allow more divergence for the 95% limits
+        expect_equal(unname(ss[, c(1, 5)] / bda[, c(1, 5)]),
+                     matrix(1, ncol=2, nrow=8), tolerance=.2,
+                     label="Multiple chain Stan output matches BDA")
+    }
+)
 
-test_that("8 schools example is reproduced accurately with multiple chains", {
-  set.seed(17610407)
+test_that(
+    "8 schools example is reproduced accurately with multiple chains (jags)",
+    {
+        set.seed(17610407)
+        
+        jmod <- sbhm(schools$effect, schools$se, nchains=4, engine="jags")
+        sj <- get.sbhm.summary(jmod)[1:8, ]
 
-  has.stan <- require(rstan)
+        ## Quartiles should be less variable than the 95% intervals
+        expect_equal(unname(sj[, 2:4] / bda[, 2:4]),
+                     matrix(1, ncol=3, nrow=8), tolerance=.15,
+                     label="Multiple chain JAGS output matches BDA")
 
-  if  (has.stan){
-    smod <- sbhm(schools$effect, schools$se, nchains=4)
-    ss <- get.sbhm.summary(smod)[1:8, ]
-    
-    # Quartiles should be less variable than the 95% intervals
-    expect_equal(unname(ss[, 2:4] / bda[, 2:4]), matrix(1, ncol=3, nrow=8), tolerance=.15,
-                 label="Multiple chain Stan output matches BDA")
-    # Allow more divergence for the 95% limits
-    expect_equal(unname(ss[, c(1, 5)] / bda[, c(1, 5)]), matrix(1, ncol=2, nrow=8), tolerance=.2,
-                 label="Multiple chain Stan output matches BDA")
-  }
-
-  jmod <- sbhm(schools$effect, schools$se, nchains=4, engine="jags")
-  sj <- get.sbhm.summary(jmod)[1:8, ]
-
-  # Quartiles should be less variable than the 95% intervals
-  expect_equal(unname(sj[, 2:4] / bda[, 2:4]), matrix(1, ncol=3, nrow=8), tolerance=.15,
-               label="Multiple chain Stan output matches BDA")
-
-  # Allow more divergence for the 95% limits
-  expect_equal(unname(sj[, c(1, 5)] / bda[, c(1, 5)]), matrix(1, ncol=2, nrow=8), tolerance=.2,
-               label="Multiple chain Stan output matches BDA")
-})
+        ## Allow more divergence for the 95% limits
+        expect_equal(unname(sj[, c(1, 5)] / bda[, c(1, 5)]),
+                     matrix(1, ncol=2, nrow=8), tolerance=.2,
+                     label="Multiple chain JAGS output matches BDA")
+    }
+)
