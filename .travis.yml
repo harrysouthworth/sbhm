@@ -1,0 +1,5 @@
+language: r
+sudo: required
+
+before_install:
+  - sudo apt-get install jags
