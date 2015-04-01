@@ -7,6 +7,6 @@ Author: Harry Southworth
 Maintainer: Harry Southworth <harry@dataclarityconsulting.co.uk>
 LazyData: TRUE
 Description: Use Stan or JAGS to fit a Gaussian hierarchical model with 2 levels and no covariates
-Depends: rjags, coda
+Imports: rjags, coda
 Suggests: rstan, parallel, testthat
 License: TBD
