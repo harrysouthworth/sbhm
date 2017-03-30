@@ -1,4 +1,6 @@
 #' @import rjags coda
+#' @importFrom graphics axis box par plot points segments
+#' @importFrom stats qnorm
 NULL
 
 runStan <- function(data, nchains, iter, burn, thin) {
@@ -6,6 +8,11 @@ runStan <- function(data, nchains, iter, burn, thin) {
     if (!is.stan) {
         stop("rstan is not available")
     }
+    cpp <- require("Rcpp")
+    if (!cpp){
+      stop("Need Rcpp to use Stan")
+    }
+
     mod <- "data {  int<lower=0> J;
                     real y[J];
                     real<lower=0> sigma[J];
@@ -57,9 +64,7 @@ runJags <- function(data, nchains, iter, burn, thin) {
 #' @param tauScale The scale parameter for the half-Cauchy distribution for the top
 #'   level scale. Defaults to twice the range of \code{y}.
 #' @param engine Which MCMC engine to use. Defaults to \code{engine="stan"} and
-#'   if \code{stan} is not avaiable will try \code{JAGS}. Note that if the engine
-#'   is JAGS, a since Markov chain will be run, irrespective of the \code{nchains}
-#'   argument.
+#'   if \code{stan} is not avaiable will try \code{JAGS}.
 #' @param nchains The number of chains to run. If not specified and \code{stan} is
 #'   available, the function tries to figure out how many cores are available,
 #'   then uses all but one of them to run a chain. If JAGS is to be used, it defaults
@@ -108,22 +113,22 @@ sbhm <- function(y, s, m=0, tauScale=NULL, engine=c("stan", "jags"),
                  nchains=NULL, iter=41000, burn=1000, thin=4,
                  probs=c(.025, .25, .5, .75, .975)){
     thecall <- match.call()
-    
+
     engine <- match.arg(engine)
 
     ## setup the data
-    
+
     J <- length(y)
     if (length(s) != J) {
         stop("y and s have different lengths")
     }
-    
+
     if (missing(tauScale)) {
         tauScale <- 2 * abs(diff(range(y))) # let it fail if there are NAs
     }
-    
+
     d <- list(J=J, y=y, sigma=s, tauScale=tauScale, m=m)
-    
+
     res <-
         switch(engine,
                stan={
@@ -135,10 +140,10 @@ sbhm <- function(y, s, m=0, tauScale=NULL, engine=c("stan", "jags"),
                    runJags(d, nchains, iter, burn, thin)
                },
                stop("unknown MCMC engine"))
-    
+
     data <- data.frame(y=y, s=s)
     if (!is.null(names(y))) rownames(data) <- names(y)
-    
+
     res <- list(fit=res,
                 probs=probs,
                 engine=engine,
@@ -202,7 +207,7 @@ plot.sbhm <- function(x, xlab="Estimates", ylab="", main="", mle.col="blue", sbh
   on.exit(oldpar)
   oldpar <- par(no.readonly=TRUE)
   par(mar=margins)
-  
+
   # First get the initial estimates and put intervals on them
   d <- x$data
   n <- length(d$y)
